@@ -1,0 +1,39 @@
+import { describe, expect, it } from "vitest";
+import { createHarness } from "./helpers.js";
+
+describe("propagation", () => {
+  it("round-trips a W3C traceparent", async () => {
+    const producer = createHarness();
+    const carrier = await producer.telemetry.startSpan({ name: "client" }, (span) =>
+      producer.telemetry.propagation.inject(span),
+    );
+    const client = producer.byName("client").spanContext();
+    expect(carrier.traceparent).toBe(`00-${client.traceId}-${client.spanId}-01`);
+
+    const consumer = createHarness();
+    const remote = consumer.telemetry.propagation.extract(carrier);
+    await remote.startSpan({ name: "server" }, (span) => span.startSpan({ name: "inner" }, () => undefined));
+    const server = consumer.byName("server");
+    expect(server.spanContext().traceId).toBe(client.traceId);
+    expect(server.parentSpanContext?.spanId).toBe(client.spanId);
+    expect(consumer.byName("inner").spanContext().traceId).toBe(client.traceId);
+  });
+
+  it("injects nothing for the root context and extracts an empty carrier as a new trace", async () => {
+    const h = createHarness();
+    expect(h.telemetry.propagation.inject(h.telemetry)).toEqual({});
+    await h.telemetry.propagation.extract({}).startSpan({ name: "s" }, () => undefined);
+    expect(h.byName("s").parentSpanContext).toBeUndefined();
+  });
+
+  it("links to an extracted remote context", async () => {
+    const producer = createHarness();
+    const carrier = await producer.telemetry.startSpan({ name: "client" }, (span) =>
+      producer.telemetry.propagation.inject(span),
+    );
+    const h = createHarness();
+    const remote = h.telemetry.propagation.extract(carrier);
+    await h.telemetry.startSpan({ name: "s", links: [{ context: remote }] }, () => undefined);
+    expect(h.byName("s").links[0]?.context.spanId).toBe(producer.byName("client").spanContext().spanId);
+  });
+});
