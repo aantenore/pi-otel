@@ -1,6 +1,46 @@
-# @aantenore/pi-otel
+# pi-otel
 
-OpenTelemetry adapter for the [`@earendil-works/pi-telemetry`](https://www.npmjs.com/package/@earendil-works/pi-telemetry) contract. It turns the callback-based `TelemetryContext` / `TelemetrySpan` API into OpenTelemetry spans, metrics and trace propagation. It passes the official adapter conformance suite.
+**See every Pi model call in the observability stack you already use.**
+
+[![CI](https://github.com/aantenore/pi-otel/actions/workflows/ci.yml/badge.svg)](https://github.com/aantenore/pi-otel/actions/workflows/ci.yml)
+![conformance](https://img.shields.io/badge/pi--telemetry%20conformance-passing-brightgreen)
+![runtime deps](https://img.shields.io/badge/runtime%20deps-0-blue)
+![license](https://img.shields.io/badge/license-MIT-lightgrey)
+
+[Pi](https://github.com/earendil-works/pi) speaks a small, vendor-neutral telemetry contract
+([`@earendil-works/pi-telemetry`](https://www.npmjs.com/package/@earendil-works/pi-telemetry)) but ships no exporter.
+`pi-otel` is the missing adapter: one line turns that contract into **OpenTelemetry** spans, metrics and trace
+propagation, so Jaeger, Grafana Tempo, Honeycomb, Datadog, Langfuse, Arize Phoenix or any OTLP backend can show
+what your agents are doing, what they cost and where the time goes.
+
+```ts
+const telemetry = createOtelTelemetry({ genAi: true });
+```
+
+![A Pi request traced in Arize Phoenix: a support.ticket span with two pi.ai.request LLM spans, model gemma4:12b, token counts and 28 attributes](docs/phoenix-trace.jpg)
+
+*A real trace: one application span, two `pi.ai.request` calls to a local `gemma4:12b` through Ollama, exported with
+`pi-otel` and rendered by Arize Phoenix. Phoenix recognises them as LLM calls because `genAi: true` adds the
+OpenTelemetry GenAI semantic-convention attributes.*
+
+## Why
+
+- **Passes Pi's official adapter conformance suite**: the same tests the contract authors ship, run in CI.
+- **No lock-in.** It builds on `@opentelemetry/api`, so you pick the SDK, exporter and backend. Zero runtime dependencies.
+- **GenAI semantic conventions** (`gen_ai.request.model`, `gen_ai.usage.*`, finish reasons) on Pi's model spans, so LLM-aware
+  backends light up without custom dashboards.
+- **Faithful to the contract**: explicit parents (no hidden async context), callback-owned span lifetime,
+  last-write-wins status, failures that never break your code.
+- **Distributed traces**: `inject` / `extract` with W3C Trace Context to follow one task across services and workers.
+
+## Compatibility at a glance
+
+| Pi package | Telemetry hook | Status |
+|---|---|---|
+| `@earendil-works/pi-telemetry` 1.3 | contract + conformance suite | supported, tested in CI |
+| `@earendil-works/pi-ai` | per-request parent span (`telemetry` on `main`, `telemetryContext` in 1.3) | the 1.3.0 release forwards the parent but emits no spans yet; spans like `pi.ai.request` are on `main` and verified end to end with this adapter |
+| `@earendil-works/pi-durable`, `chord` | `TelemetryContext` options | instrumentation on `main`; works with any `TelemetryContext` |
+| `pi` coding agent (CLI) | – | does not accept a telemetry context today |
 
 ## Install
 
@@ -129,6 +169,11 @@ await telemetry.propagation.extract(carrier).startSpan({ name: "server.handle" }
 - Without a registered propagator (or an explicit `propagator` option) `inject` returns an empty carrier.
 - Spans created while the OpenTelemetry API has no registered SDK are non-recording.
 - Telemetry attributes are forwarded as given; do not record prompts, completions, credentials or other sensitive data.
+
+## Run the demo
+
+`examples/ollama-phoenix.mjs` reproduces the screenshot: a local Ollama model, Arize Phoenix as the backend
+(`uvx --from arize-phoenix phoenix serve`), and a pi-ai build with telemetry (`PI_AI_DIST=/path/to/pi/packages/ai/dist`).
 
 ## Development
 
