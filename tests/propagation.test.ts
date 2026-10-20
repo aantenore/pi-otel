@@ -37,3 +37,19 @@ describe("propagation", () => {
     expect(h.byName("s").links[0]?.context.spanId).toBe(producer.byName("client").spanContext().spanId);
   });
 });
+
+describe("metrics and propagation on every context", () => {
+  it("are exposed by child spans and extracted parents", async () => {
+    const { createOtelTelemetry } = await import("../src/index.js");
+    const telemetry = createOtelTelemetry();
+    await telemetry.startSpan({ name: "outer" }, async (span) => {
+      expect(span.metrics).toBe(telemetry.metrics);
+      expect(span.propagation).toBe(telemetry.propagation);
+      await span.startSpan({ name: "inner" }, (inner) => {
+        expect(inner.metrics).toBe(telemetry.metrics);
+      });
+    });
+    const remote = telemetry.propagation.extract({});
+    expect(remote.propagation).toBe(telemetry.propagation);
+  });
+});

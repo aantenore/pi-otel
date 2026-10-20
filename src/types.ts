@@ -45,6 +45,8 @@ export interface TelemetryPropagation {
 
 /** A `TelemetryContext` whose `startSpan` also accepts links. */
 export interface OtelTelemetryParent extends TelemetryContext {
+  readonly metrics?: TelemetryMetrics;
+  readonly propagation?: TelemetryPropagation;
   startSpan<T>(options: OtelSpanOptions, callback: (span: OtelTelemetrySpan) => T | Promise<T>): Promise<T>;
 }
 
@@ -55,6 +57,8 @@ export interface OtelTelemetryContext extends OtelTelemetryParent {
 }
 
 export interface OtelTelemetrySpan extends TelemetrySpan {
+  readonly metrics?: TelemetryMetrics;
+  readonly propagation?: TelemetryPropagation;
   addLink(link: TelemetryLink): void;
   startSpan<T>(options: OtelSpanOptions, callback: (span: OtelTelemetrySpan) => T | Promise<T>): Promise<T>;
 }

@@ -17,11 +17,9 @@ export function createOtelTelemetry(options: OtelTelemetryOptions = {}): OtelTel
     tracer: options.tracer ?? trace.getTracer(scope),
     genAi: options.genAi ?? false,
   };
-  const parent = createParent(runtime, root);
-  return Object.assign(parent, {
-    metrics: createMetrics(() => options.meter ?? metrics.getMeter(scope)),
-    propagation: createPropagation(runtime, root, options.propagator),
-  });
+  runtime.metrics = createMetrics(() => options.meter ?? metrics.getMeter(scope));
+  runtime.propagation = createPropagation(runtime, root, options.propagator);
+  return createParent(runtime, root) as OtelTelemetryContext;
 }
 
 export { GENAI_RULES, genAiAttributes } from "./genai.js";

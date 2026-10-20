@@ -10,11 +10,21 @@ import {
 import type { SpanAttributes, SpanStatus } from "@earendil-works/pi-telemetry";
 import { toOtelAttributes } from "./attributes.js";
 import { genAiAttributes } from "./genai.js";
-import type { OtelSpanOptions, OtelTelemetryParent, OtelTelemetrySpan, TelemetryLink } from "./types.js";
+import type {
+  OtelSpanOptions,
+  OtelTelemetryParent,
+  OtelTelemetrySpan,
+  TelemetryLink,
+  TelemetryMetrics,
+  TelemetryPropagation,
+} from "./types.js";
 
 export interface Runtime {
   tracer: Tracer;
   genAi: boolean;
+  /** Shared by the root, every span and every extracted parent, as the contract requires. */
+  metrics?: TelemetryMetrics;
+  propagation?: TelemetryPropagation;
 }
 
 /** Maps every context/span object handed out by this adapter to its OpenTelemetry context. */
@@ -77,6 +87,14 @@ class SpanHandle implements OtelTelemetrySpan {
     private readonly context: Context,
   ) {
     contexts.set(this, context);
+  }
+
+  get metrics(): TelemetryMetrics | undefined {
+    return this.runtime.metrics;
+  }
+
+  get propagation(): TelemetryPropagation | undefined {
+    return this.runtime.propagation;
   }
 
   startSpan<T>(options: OtelSpanOptions, callback: (span: OtelTelemetrySpan) => T | Promise<T>): Promise<T> {
@@ -219,6 +237,12 @@ export function startChildSpan<T>(
 export function createParent(runtime: Runtime, parent: Context): OtelTelemetryParent {
   const context: OtelTelemetryParent = {
     startSpan: (options, callback) => startChildSpan(runtime, parent, options, callback),
+    get metrics() {
+      return runtime.metrics;
+    },
+    get propagation() {
+      return runtime.propagation;
+    },
   };
   contexts.set(context, parent);
   return context;
