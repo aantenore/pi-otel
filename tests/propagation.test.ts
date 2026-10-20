@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { DiagLogLevel, diag } from "@opentelemetry/api";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHarness } from "./helpers.js";
 
 describe("propagation", () => {
@@ -51,5 +52,30 @@ describe("metrics and propagation on every context", () => {
     });
     const remote = telemetry.propagation.extract({});
     expect(remote.propagation).toBe(telemetry.propagation);
+  });
+});
+
+describe("missing global propagator", () => {
+  afterEach(() => diag.disable());
+
+  it("warns once through diag and keeps returning an empty carrier / root", async () => {
+    vi.resetModules();
+    const warn = vi.fn();
+    diag.setLogger({ error() {}, warn, info() {}, debug() {}, verbose() {} }, DiagLogLevel.WARN);
+    const { createOtelTelemetry } = await import("../src/index.js");
+    const telemetry = createOtelTelemetry();
+    expect(telemetry.propagation.inject(telemetry)).toEqual({});
+    telemetry.propagation.extract({ traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01" });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain("W3CTraceContextPropagator");
+  });
+
+  it("does not warn when a propagator option is given", async () => {
+    vi.resetModules();
+    const warn = vi.fn();
+    diag.setLogger({ error() {}, warn, info() {}, debug() {}, verbose() {} }, DiagLogLevel.WARN);
+    const h = createHarness();
+    h.telemetry.propagation.inject(h.telemetry);
+    expect(warn).not.toHaveBeenCalled();
   });
 });

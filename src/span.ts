@@ -3,13 +3,14 @@ import {
   trace,
   type Attributes,
   type Context,
+  type Link,
   type Span,
   type SpanContext,
   type Tracer,
 } from "@opentelemetry/api";
 import type { SpanAttributes, SpanStatus } from "@earendil-works/pi-telemetry";
-import { toOtelAttributes } from "./attributes.js";
-import { genAiAttributes } from "./genai.js";
+import { toOtelAttributes, toOtelAttributesLenient } from "./attributes.js";
+import { genAiAttributes, genAiSpanKind } from "./genai.js";
 import type {
   OtelSpanOptions,
   OtelTelemetryParent,
@@ -105,6 +106,7 @@ class SpanHandle implements OtelTelemetrySpan {
   setAttributes(attributes: SpanAttributes): void {
     if (this.settled || !this.span) return;
     try {
+      // atomic by contract: one unreadable value drops the whole batch
       const converted = toOtelAttributes(attributes);
       const extra = this.runtime.genAi ? genAiAttributes(this.name, converted, false) : {};
       this.span.setAttributes({ ...converted, ...extra });
@@ -126,8 +128,9 @@ class SpanHandle implements OtelTelemetrySpan {
   addLink(link: TelemetryLink): void {
     if (this.settled || !this.span) return;
     try {
+      if (typeof this.span.addLink !== "function") return;
       const context = resolveSpanContext(link);
-      if (context) this.span.addLink({ context, attributes: toOtelAttributes(link.attributes) });
+      if (context) this.span.addLink({ context, attributes: toOtelAttributesLenient(link.attributes) });
     } catch {
       // passive
     }
@@ -195,18 +198,32 @@ export function startChildSpan<T>(
   try {
     const name = options.name;
     if (typeof name !== "string") throw new TypeError("span name must be a string");
-    const attributes: Attributes = toOtelAttributes(options.attributes);
-    Object.assign(attributes, runtime.genAi ? genAiAttributes(name, attributes, true) : {});
-    const links = [];
-    for (const link of options.links ?? []) {
-      try {
-        const context = resolveSpanContext(link);
-        if (context) links.push({ context, attributes: toOtelAttributes(link.attributes) });
-      } catch {
-        // an unresolvable link is skipped
-      }
+    let attributes: Attributes = {};
+    try {
+      attributes = toOtelAttributesLenient(options.attributes);
+    } catch {
+      // the attribute bag itself is unreadable: start without start attributes
     }
-    const span = runtime.tracer.startSpan(name, { attributes, links }, parent);
+    Object.assign(attributes, runtime.genAi ? genAiAttributes(name, attributes, true) : {});
+    const links: Link[] = [];
+    try {
+      for (const link of options.links ?? []) {
+        try {
+          const context = resolveSpanContext(link);
+          if (context) links.push({ context, attributes: toOtelAttributesLenient(link.attributes) });
+        } catch {
+          // an unresolvable link is skipped
+        }
+      }
+    } catch {
+      // non-iterable or failing `links`: keep the links collected so far
+    }
+    const kind = runtime.genAi ? genAiSpanKind(name) : undefined;
+    const span = runtime.tracer.startSpan(
+      name,
+      { attributes, links, ...(kind === undefined ? {} : { kind }) },
+      parent,
+    );
     handle = new SpanHandle(runtime, name, span, trace.setSpan(parent, span));
   } catch {
     // span creation failed: business code still runs, without recording

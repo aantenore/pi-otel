@@ -6,7 +6,7 @@ describe("metrics", () => {
     const h = createMetricsHarness();
     const { metrics } = h.telemetry;
     metrics.counter("pi.requests", { unit: "1", description: "requests" }).add(2, { provider: "x", skip: undefined });
-    metrics.counter("pi.requests").add(3, { provider: "x" });
+    metrics.counter("pi.requests", { unit: "1", description: "requests" }).add(3, { provider: "x" });
     metrics.upDownCounter("pi.inflight").add(1);
     metrics.upDownCounter("pi.inflight").add(-1);
     metrics.histogram("pi.latency", { unit: "ms" }).record(120);
@@ -22,6 +22,17 @@ describe("metrics", () => {
   it("caches instruments by name", () => {
     const h = createMetricsHarness();
     expect(h.telemetry.metrics.counter("same")).toBe(h.telemetry.metrics.counter("same"));
+  });
+
+  it("creates a distinct instrument when unit or description differ", async () => {
+    const h = createMetricsHarness();
+    const { metrics } = h.telemetry;
+    const plain = metrics.counter("same");
+    expect(metrics.counter("same", { unit: "ms" })).not.toBe(plain);
+    expect(metrics.counter("same", { description: "d" })).not.toBe(plain);
+    expect(metrics.counter("same", { unit: "ms" })).toBe(metrics.counter("same", { unit: "ms" }));
+    expect(metrics.histogram("same")).not.toBe(metrics.histogram("same", { unit: "s" }));
+    expect(metrics.upDownCounter("same")).not.toBe(metrics.upDownCounter("same", { unit: "s" }));
   });
 
   it("never throws", () => {

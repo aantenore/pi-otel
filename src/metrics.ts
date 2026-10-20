@@ -16,11 +16,13 @@ export function createMetrics(getMeter: () => Meter): TelemetryMetrics {
   const upDownCounters = new Map<string, TelemetryCounter>();
   const histograms = new Map<string, TelemetryHistogram>();
 
-  const cached = <I>(cache: Map<string, I>, name: string, create: () => I): I => {
-    let instrument = cache.get(name);
+  /** Differing unit/description yield a distinct instrument instead of silently reusing the first. */
+  const cached = <I>(cache: Map<string, I>, name: string, options: InstrumentOptions | undefined, create: () => I): I => {
+    const key = `${name}\u0000${options?.unit ?? ""}\u0000${options?.description ?? ""}`;
+    let instrument = cache.get(key);
     if (!instrument) {
       instrument = create();
-      cache.set(name, instrument);
+      cache.set(key, instrument);
     }
     return instrument;
   };
@@ -41,7 +43,7 @@ export function createMetrics(getMeter: () => Meter): TelemetryMetrics {
 
   return {
     counter: (name, options) =>
-      cached(counters, name, () => {
+      cached(counters, name, options, () => {
         const add = recorder(() => {
           const instrument = getMeter().createCounter(name, settings(options));
           return (value, attributes) => instrument.add(value, attributes);
@@ -49,7 +51,7 @@ export function createMetrics(getMeter: () => Meter): TelemetryMetrics {
         return { add };
       }),
     upDownCounter: (name, options) =>
-      cached(upDownCounters, name, () => {
+      cached(upDownCounters, name, options, () => {
         const add = recorder(() => {
           const instrument = getMeter().createUpDownCounter(name, settings(options));
           return (value, attributes) => instrument.add(value, attributes);
@@ -57,7 +59,7 @@ export function createMetrics(getMeter: () => Meter): TelemetryMetrics {
         return { add };
       }),
     histogram: (name, options) =>
-      cached(histograms, name, () => {
+      cached(histograms, name, options, () => {
         const record = recorder(() => {
           const instrument = getMeter().createHistogram(name, settings(options));
           return (value, attributes) => instrument.record(value, attributes);

@@ -1,5 +1,6 @@
 import { SpanStatusCode } from "@opentelemetry/api";
 import { describe, expect, it } from "vitest";
+import { createOtelTelemetry } from "../src/index.js";
 import { createHarness } from "./helpers.js";
 
 describe("nesting", () => {
@@ -159,5 +160,76 @@ describe("lifecycle", () => {
     release();
     await pending;
     expect(h.spans()).toHaveLength(1);
+  });
+});
+
+describe("robustness", () => {
+  const throwing = (): Record<string, unknown> => ({
+    ok: 1,
+    get bad(): string {
+      throw new Error("unreadable");
+    },
+    also: "fine",
+  });
+
+  it("keeps the readable subset of start attributes when one getter throws", async () => {
+    const h = createHarness();
+    await h.telemetry.startSpan({ name: "s", attributes: throwing() as never }, () => undefined);
+    expect(h.byName("s").attributes).toEqual({ ok: 1, also: "fine" });
+  });
+
+  it("still creates the span when the attribute bag is a throwing Proxy", async () => {
+    const h = createHarness();
+    const proxy = new Proxy({}, { ownKeys: () => { throw new Error("no keys"); } });
+    await h.telemetry.startSpan({ name: "s", attributes: proxy as never }, () => undefined);
+    expect(h.byName("s").attributes).toEqual({});
+  });
+
+  it("drops only the bad link and survives a non-iterable links option", async () => {
+    const h = createHarness();
+    let target: Parameters<Parameters<typeof h.telemetry.startSpan>[1]>[0] | undefined;
+    await h.telemetry.startSpan({ name: "target" }, (span) => {
+      target = span;
+    });
+    const broken = {
+      get context(): never {
+        throw new Error("unreadable");
+      },
+    };
+    await h.telemetry.startSpan(
+      { name: "mixed", links: [broken, { context: target!, attributes: throwing() as never }] as never },
+      () => undefined,
+    );
+    const links = h.byName("mixed").links;
+    expect(links).toHaveLength(1);
+    expect(links[0]?.attributes).toEqual({ ok: 1, also: "fine" });
+
+    await h.telemetry.startSpan({ name: "plain", links: 42 as never }, () => undefined);
+    expect(h.byName("plain").links).toHaveLength(0);
+  });
+
+  it("setAttributes stays atomic: an unreadable value drops the whole batch", async () => {
+    const h = createHarness();
+    await h.telemetry.startSpan({ name: "s", attributes: { kept: 1 } }, (span) => {
+      expect(() => span.setAttributes(throwing() as never)).not.toThrow();
+      span.setAttributes({ later: 2 });
+    });
+    expect(h.byName("s").attributes).toEqual({ kept: 1, later: 2 });
+  });
+
+  it("addLink is a no-op when the span has no addLink", async () => {
+    const calls: string[] = [];
+    const fakeSpan = {
+      setAttributes: () => fakeSpan,
+      addEvent: () => fakeSpan,
+      setStatus: () => fakeSpan,
+      end: () => calls.push("end"),
+      spanContext: () => ({ traceId: "0".repeat(32), spanId: "0".repeat(16), traceFlags: 0 }),
+    };
+    const telemetry = createOtelTelemetry({ tracer: { startSpan: () => fakeSpan } as never });
+    await telemetry.startSpan({ name: "s" }, (span) => {
+      expect(() => span.addLink({ context: telemetry })).not.toThrow();
+    });
+    expect(calls).toEqual(["end"]);
   });
 });

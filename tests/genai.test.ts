@@ -1,5 +1,7 @@
 import { createModels, fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
+import { SpanKind } from "@opentelemetry/api";
 import { describe, expect, it } from "vitest";
+import { genAiAttributes } from "../src/genai.js";
 import { createHarness } from "./helpers.js";
 
 describe("genAi option", () => {
@@ -28,13 +30,25 @@ describe("genAi option", () => {
       "gen_ai.operation.name": "chat",
       "gen_ai.provider.name": "openai",
       "gen_ai.request.model": "gpt-x",
-      "gen_ai.usage.input_tokens": 10,
+      "gen_ai.usage.input_tokens": 15,
       "gen_ai.usage.output_tokens": 5,
       "gen_ai.usage.cache_read.input_tokens": 4,
+      "gen_ai.usage.cache_creation.input_tokens": 1,
       "gen_ai.response.finish_reasons": ["stop"],
       "gen_ai.response.id": "resp_1",
     });
-    expect(Object.keys(attributes).some((key) => key.startsWith("gen_ai.") && key.includes("cache_write"))).toBe(false);
+  });
+
+  it("starts pi.ai.request as a CLIENT span only when genAi is on", async () => {
+    const on = createHarness({ genAi: true });
+    await on.telemetry.startSpan({ name: "pi.ai.request" }, () => undefined);
+    await on.telemetry.startSpan({ name: "other" }, () => undefined);
+    expect(on.byName("pi.ai.request").kind).toBe(SpanKind.CLIENT);
+    expect(on.byName("other").kind).toBe(SpanKind.INTERNAL);
+
+    const off = createHarness();
+    await off.telemetry.startSpan({ name: "pi.ai.request" }, () => undefined);
+    expect(off.byName("pi.ai.request").kind).toBe(SpanKind.INTERNAL);
   });
 
   it("is off by default and ignores other span names", async () => {
@@ -80,5 +94,36 @@ describe("genAi option", () => {
     expect(attributes["gen_ai.response.finish_reasons"]).toEqual([message.stopReason]);
     expect(attributes["gen_ai.response.id"]).toBe("faux-1");
     expect(attributes["gen_ai.usage.input_tokens"]).toBe(message.usage.input);
+  });
+});
+
+describe("genAiAttributes rules", () => {
+  const finish = (stop: unknown) =>
+    genAiAttributes("pi.ai.request", { stop: stop as string }, false)["gen_ai.response.finish_reasons"];
+
+  it("maps pi-ai stop reasons to GenAI finish reasons and passes unknown values through", () => {
+    expect(finish("stop")).toEqual(["stop"]);
+    expect(finish("length")).toEqual(["length"]);
+    expect(finish("toolUse")).toEqual(["tool_call"]);
+    expect(finish("error")).toEqual(["error"]);
+    expect(finish("aborted")).toEqual(["aborted"]);
+    expect(finish("constructor")).toEqual(["constructor"]);
+  });
+
+  it("maps each element of an array source instead of joining it", () => {
+    expect(finish(["toolUse", "stop", "custom"])).toEqual(["tool_call", "stop", "custom"]);
+  });
+
+  it("sums input, cache_read and cache_write present in the same batch", () => {
+    const tokens = (batch: Record<string, number | string>) =>
+      genAiAttributes("pi.ai.request", batch, false)["gen_ai.usage.input_tokens"];
+    expect(tokens({ "usage.input": 10, "usage.cache_read": 4, "usage.cache_write": 1 })).toBe(15);
+    expect(tokens({ "usage.input": 10, "usage.cache_read": 4 })).toBe(14);
+    expect(tokens({ "usage.cache_write": 2 })).toBe(2);
+    expect(tokens({ "usage.input": 10, "usage.cache_read": "n/a" })).toBe(10);
+    expect(tokens({ "usage.output": 3 })).toBeUndefined();
+    expect(genAiAttributes("pi.ai.request", { "usage.cache_write": 2 }, false)).toMatchObject({
+      "gen_ai.usage.cache_creation.input_tokens": 2,
+    });
   });
 });

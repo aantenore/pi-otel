@@ -34,3 +34,27 @@ export function toOtelAttributes(attributes: SpanAttributes | undefined): Attrib
   }
   return result;
 }
+
+/**
+ * Like {@link toOtelAttributes} but never throws: a key whose value is unreadable is dropped
+ * and the readable subset is returned.
+ */
+export function toOtelAttributesLenient(attributes: SpanAttributes | undefined): Attributes {
+  const result: Attributes = {};
+  if (attributes === undefined) return result;
+  let keys: string[] = [];
+  try {
+    keys = Object.keys(attributes);
+  } catch {
+    return result;
+  }
+  for (const key of keys) {
+    try {
+      const value = convertValue(attributes[key]);
+      if (value !== undefined) result[key] = value;
+    } catch {
+      // unreadable value: only this key is dropped
+    }
+  }
+  return result;
+}

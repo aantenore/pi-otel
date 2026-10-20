@@ -42,13 +42,16 @@ OpenTelemetry GenAI semantic-convention attributes.*
 | `@earendil-works/pi-durable`, `chord` | `TelemetryContext` options | instrumentation on `main`; works with any `TelemetryContext` |
 | `pi` coding agent (CLI) | – | does not accept a telemetry context today |
 
+Links require an OpenTelemetry SDK whose `Span` implements `addLink` (`@opentelemetry/sdk-trace-base` 2.x); with older SDKs
+`span.addLink` is a silent no-op, while links passed to `startSpan` depend on the SDK honouring `links`.
+
 ## Install
 
 ```bash
 npm install @aantenore/pi-otel @opentelemetry/api @earendil-works/pi-telemetry
 ```
 
-`@opentelemetry/api` (^1.9) and `@earendil-works/pi-telemetry` (^1.3) are peer dependencies. Node >= 22.19.
+`@opentelemetry/api` (^1.9) and `@earendil-works/pi-telemetry` (^1.3) are peer dependencies (the Pi package is optional at runtime: it is only used for types). Node >= 22.19.
 
 ## Usage
 
@@ -124,11 +127,17 @@ With `genAi: true`, spans named `pi.ai.request` get these attributes in addition
 | (constant) | `gen_ai.operation.name` = `chat` |
 | `provider` | `gen_ai.provider.name` |
 | `model` | `gen_ai.request.model` |
-| `usage.input` | `gen_ai.usage.input_tokens` |
+| `usage.input` + `usage.cache_read` + `usage.cache_write` | `gen_ai.usage.input_tokens` (sum of the values present in the same attribute batch) |
 | `usage.output` | `gen_ai.usage.output_tokens` |
 | `usage.cache_read` | `gen_ai.usage.cache_read.input_tokens` |
-| `stop` | `gen_ai.response.finish_reasons` (single-element array) |
+| `usage.cache_write` | `gen_ai.usage.cache_creation.input_tokens` |
+| `stop` | `gen_ai.response.finish_reasons` (array; `stop`, `length`, `error` kept, `toolUse` becomes `tool_call`, unknown values unchanged) |
 | `response.id` | `gen_ai.response.id` |
+
+The span is also started with `SpanKind.CLIENT`; span names are not changed.
+
+pi-ai's `usage.input` excludes cached tokens, while the GenAI convention's `gen_ai.usage.input_tokens` includes them,
+hence the sum above. The original `usage.*` attributes are left untouched.
 
 The table lives in `src/genai.ts` (`GENAI_RULES`); mappings are applied to the start attributes and to every `setAttributes` batch.
 
@@ -152,7 +161,7 @@ The table lives in `src/genai.ts` (`GENAI_RULES`); mappings are applied to the s
 The 1.3.0 contract has only `startSpan`, `addEvent`, `setAttributes` and `setStatus`. The adapter additionally provides the following. They are optional for consumers and invisible to code that only uses `TelemetryContext`.
 
 - **Links**: `startSpan({ name, links: [{ context, attributes? }] })` and `span.addLink(link)`. `context` must be a span or context produced by this adapter (including `propagation.extract` results); other values are skipped.
-- **Metrics** (`telemetry.metrics`): `counter(name, opts?).add(v, attrs?)`, `upDownCounter(name, opts?).add(v, attrs?)`, `histogram(name, opts?).record(v, attrs?)`; `opts` = `{ unit?, description? }`. Instruments are cached by name.
+- **Metrics** (`telemetry.metrics`): `counter(name, opts?).add(v, attrs?)`, `upDownCounter(name, opts?).add(v, attrs?)`, `histogram(name, opts?).record(v, attrs?)`; `opts` = `{ unit?, description? }`. Instruments are cached by name, unit and description; different options create a distinct instrument.
 - **Propagation** (`telemetry.propagation`): `inject(span)` returns a carrier (`Record<string, string>`); `extract(carrier)` returns a context whose children continue the remote trace.
 
 ```ts
@@ -166,7 +175,7 @@ await telemetry.propagation.extract(carrier).startSpan({ name: "server.handle" }
 ## Limitations
 
 - A span ends only through the callback; there is no manual `end()`.
-- Without a registered propagator (or an explicit `propagator` option) `inject` returns an empty carrier.
+- Without a registered propagator (or an explicit `propagator` option) `inject` returns an empty carrier and a one-time `diag.warn` is emitted; register one such as `W3CTraceContextPropagator`.
 - Spans created while the OpenTelemetry API has no registered SDK are non-recording.
 - Telemetry attributes are forwarded as given; do not record prompts, completions, credentials or other sensitive data.
 
