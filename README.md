@@ -185,6 +185,10 @@ await telemetry.propagation.extract(carrier).startSpan({ name: "server.handle" }
 `examples/ollama-phoenix.mjs` reproduces the screenshot: a local Ollama model, Arize Phoenix as the backend
 (`uvx --from arize-phoenix phoenix serve`), and a pi-ai build with telemetry (`PI_AI_DIST=/path/to/pi/packages/ai/dist`).
 
+Using a keyless local server (Ollama, llama.cpp) with `createProvider()` and `openAICompletionsApi()`? Resolve auth
+with a placeholder key, `({ auth: { apiKey: 'unused' } })`. An empty `auth` fails with `No API key for provider`
+([#1](https://github.com/aantenore/pi-otel/issues/1)).
+
 ## Development
 
 ```bash
