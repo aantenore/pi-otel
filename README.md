@@ -2,6 +2,7 @@
 
 **See every Pi model call in the observability stack you already use.**
 
+[![npm](https://img.shields.io/npm/v/@aantenore/pi-otel)](https://www.npmjs.com/package/@aantenore/pi-otel)
 [![CI](https://github.com/aantenore/pi-otel/actions/workflows/ci.yml/badge.svg)](https://github.com/aantenore/pi-otel/actions/workflows/ci.yml)
 ![conformance](https://img.shields.io/badge/pi--telemetry%20conformance-passing-brightgreen)
 ![runtime deps](https://img.shields.io/badge/runtime%20deps-0-blue)
